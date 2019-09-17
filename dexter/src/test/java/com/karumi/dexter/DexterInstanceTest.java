@@ -33,15 +33,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.Collections;
 
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.argThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Matchers.isA;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,8 +63,6 @@ import static org.mockito.Mockito.when;
 
   @Before public void setUp() {
     IntentProvider intentProvider = new IntentMockProvider(intent);
-    Context mockApplicationContext = mock(Context.class);
-    when(context.getApplicationContext()).thenReturn(mockApplicationContext);
     asyncExecutor = new AsyncExecutor();
     dexter = new DexterInstance(context, androidPermissionService, intentProvider);
   }
@@ -123,7 +121,7 @@ import static org.mockito.Mockito.when;
 
   @Test public void onPermissionPermanentlyDeniedThenNotifiesListener() {
     givenPermissionIsAlreadyDenied(ANY_PERMISSION);
-    givenShouldNotShowRationaleForPermission(ANY_PERMISSION);
+    givenPermissionIsPermanentlyDenied(ANY_PERMISSION);
 
     whenCheckPermission(permissionListener, ANY_PERMISSION);
     dexter.onPermissionRequestDenied(Collections.singletonList(ANY_PERMISSION));
@@ -142,6 +140,25 @@ import static org.mockito.Mockito.when;
     thenPermissionIsDenied(ANY_PERMISSION);
   }
 
+  @Test(expected = DexterException.class) public void onCheckPermissionTwiceThenThrowException() {
+    givenPermissionIsAlreadyDenied(ANY_PERMISSION);
+
+    whenCheckPermission(permissionListener, ANY_PERMISSION);
+    whenCheckPermission(permissionListener, ANY_PERMISSION);
+
+    verifyRequestPermissions(new String[]{ANY_PERMISSION}, 1);
+  }
+
+  @Test public void onCheckPermissionAgainAfterActivityDestroyedThenRequestedTwice() {
+    givenPermissionIsAlreadyDenied(ANY_PERMISSION);
+
+    whenCheckPermission(permissionListener, ANY_PERMISSION);
+    dexter.onActivityDestroyed();
+    whenCheckPermission(permissionListener, ANY_PERMISSION);
+
+    verifyRequestPermissions(new String[]{ANY_PERMISSION}, 2);
+  }
+
   private void givenPermissionIsAlreadyDenied(String permission) {
     givenPermissionIsChecked(permission, PackageManager.PERMISSION_DENIED);
   }
@@ -152,7 +169,7 @@ import static org.mockito.Mockito.when;
 
   private void givenPermissionIsChecked(String permission, int permissionState) {
     when(androidPermissionService.checkSelfPermission(
-        any(Activity.class),
+        any(Context.class),
         eq(permission))
     ).thenReturn(permissionState);
   }
@@ -171,6 +188,13 @@ import static org.mockito.Mockito.when;
     ).thenReturn(false);
   }
 
+  private void givenPermissionIsPermanentlyDenied(String permission) {
+    when(androidPermissionService.isPermissionPermanentlyDenied(
+        any(Activity.class),
+        eq(permission))
+    ).thenReturn(true);
+  }
+
   private PermissionListener givenARetryCheckPermissionOnDeniedPermissionListener(
       PermissionListener permissionListener) {
     return new RetryCheckPermissionOnDeniedPermissionListener(permissionListener,
@@ -185,6 +209,10 @@ import static org.mockito.Mockito.when;
   private void whenCheckPermission(PermissionListener permissionListener, String permission) {
     dexter.checkPermission(permissionListener, permission, THREAD);
     dexter.onActivityReady(activity);
+  }
+
+  private void verifyRequestPermissions(String[] permissions, int nTimes) {
+    verify(androidPermissionService, times(nTimes)).requestPermissions(eq(activity), eq(permissions), anyInt());
   }
 
   private void thenPermissionIsGranted(String permission) {
@@ -216,8 +244,7 @@ import static org.mockito.Mockito.when;
   private static ArgumentMatcher<PermissionGrantedResponse> getPermissionGrantedResponseMatcher(
       final String permission) {
     return new ArgumentMatcher<PermissionGrantedResponse>() {
-      @Override public boolean matches(Object argument) {
-        PermissionGrantedResponse response = (PermissionGrantedResponse) argument;
+      @Override public boolean matches(PermissionGrantedResponse response) {
         return permission.equals(response.getPermissionName());
       }
     };
@@ -226,8 +253,7 @@ import static org.mockito.Mockito.when;
   private static ArgumentMatcher<PermissionDeniedResponse> getPermissionDeniedResponseMatcher(
       final String permission, final boolean isPermanentlyDenied) {
     return new ArgumentMatcher<PermissionDeniedResponse>() {
-      @Override public boolean matches(Object argument) {
-        PermissionDeniedResponse response = (PermissionDeniedResponse) argument;
+      @Override public boolean matches(PermissionDeniedResponse response) {
         return permission.equals(response.getPermissionName())
             && response.isPermanentlyDenied() == isPermanentlyDenied;
       }
@@ -237,8 +263,7 @@ import static org.mockito.Mockito.when;
   private static ArgumentMatcher<PermissionRequest> getPermissionRequestShouldShowTokenMatcher(
       final String permission) {
     return new ArgumentMatcher<PermissionRequest>() {
-      @Override public boolean matches(Object argument) {
-        PermissionRequest request = (PermissionRequest) argument;
+      @Override public boolean matches(PermissionRequest request) {
         return permission.equals(request.getName());
       }
     };
